@@ -59,6 +59,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -205,7 +206,7 @@ public class AWSCodeDeployPublisher extends Publisher {
                 this.proxyPort);
         }
 
-        boolean success;
+        boolean success = false;
 
         try {
 
@@ -215,9 +216,21 @@ public class AWSCodeDeployPublisher extends Publisher {
             RevisionLocation revisionLocation = zipAndUpload(aws, projectName, getSourceDirectory(build.getWorkspace()), build.getEnvironment(listener));
 
             registerRevision(aws, revisionLocation);
-            String deploymentId = createDeployment(aws, revisionLocation);
 
-            success = waitForDeployment(aws, deploymentId);
+            // kfowler: hack to deploy to multiple groups
+            String[] deploymentGroupNames = this.getDeploymentGroupName().split(",");
+            String[] deploymentConfigs    = this.getDeploymentConfig().split(",");
+            if (deploymentGroupNames.length != deploymentConfigs.length)
+                throw new RuntimeException("# of deployment configs must equal # of deployment group names");
+
+            for(int i = 0; i < deploymentGroupNames.length; ++i) {
+                String group = deploymentGroupNames[i];
+                String config = deploymentConfigs[i];
+                String deploymentId = createDeployment(aws, revisionLocation, group, config);
+                success = waitForDeployment(aws, deploymentId);
+                if (!success)
+                    break;
+            }
 
         } catch (Exception e) {
 
@@ -334,17 +347,17 @@ public class AWSCodeDeployPublisher extends Publisher {
         );
     }
 
-    private String createDeployment(AWSClients aws, RevisionLocation revisionLocation) throws Exception {
+    private String createDeployment(AWSClients aws, RevisionLocation revisionLocation, String deploymentGroupName, String deploymentConfig) throws Exception {
 
         this.logger.println("Creating deployment with revision at " + revisionLocation);
 
         CreateDeploymentResult createDeploymentResult = aws.codedeploy.createDeployment(
-                new CreateDeploymentRequest()
-                        .withDeploymentConfigName(this.deploymentConfig)
-                        .withDeploymentGroupName(this.deploymentGroupName)
-                        .withApplicationName(this.applicationName)
-                        .withRevision(revisionLocation)
-                        .withDescription("Deployment created by Jenkins")
+            new CreateDeploymentRequest()
+                .withDeploymentConfigName(deploymentConfig)
+                .withDeploymentGroupName(deploymentGroupName)
+                .withApplicationName(this.applicationName)
+                .withRevision(revisionLocation)
+                .withDescription("Deployment created by Jenkins")
         );
 
         return createDeploymentResult.getDeploymentId();
