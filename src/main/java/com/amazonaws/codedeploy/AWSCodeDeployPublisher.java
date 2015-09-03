@@ -277,7 +277,6 @@ public class AWSCodeDeployPublisher extends Publisher {
     private RevisionLocation zipAndUpload(AWSClients aws, String projectName, FilePath sourceDirectory, Map<String, String> envVars) throws IOException,  InterruptedException {
 
         File zipFile = File.createTempFile(projectName + "-", ".zip");
-        String key;
 
         try {
             this.logger.println("Zipping files into " + zipFile.getAbsolutePath());
@@ -287,19 +286,25 @@ public class AWSCodeDeployPublisher extends Publisher {
                     new DirScanner.Glob(this.includes, this.excludes)
             );
 
+            /* kfowler: use the project name instead of the temp flie name for the s3 file
+             * TODO(kfowler): make this configurable in the UI
+             */
+            String key;
             if (this.s3prefix.isEmpty()) {
-                key = zipFile.getName();
+                // key = zipFile.getName();
+                key = projectName + ".zip";
             } else {
                 key = Util.replaceMacro(this.s3prefix, envVars);
                 if (this.s3prefix.endsWith("/")) {
-                    key += zipFile.getName();
+                    // key += zipFile.getName();
+                    key += projectName + ".zip";
                 } else {
-                    key += "/" + zipFile.getName();
+                    // key += "/" + zipFile.getName();
+                    key += "/" + projectName + ".zip";
                 }
             }
             logger.println("Uploading zip to s3://" + this.s3bucket + "/" + key);
             PutObjectResult s3result = aws.s3.putObject(this.s3bucket, key, zipFile);
-
 
             S3Location s3Location = new S3Location();
             s3Location.setBucket(this.s3bucket);
