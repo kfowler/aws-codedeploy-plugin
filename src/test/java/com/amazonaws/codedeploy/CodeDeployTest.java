@@ -14,14 +14,24 @@
  */
 package com.amazonaws.codedeploy;
 
+import java.io.IOException;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.xml.sax.SAXException;
+
 import com.gargoylesoftware.htmlunit.WebAssert;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import org.jvnet.hudson.test.HudsonTestCase;
 
-public class CodeDeployTest extends HudsonTestCase {
+public class CodeDeployTest {
 
-    public void testConfig() throws Exception {
-        HtmlPage page = new WebClient().goTo("configure");
+    @Rule
+    public JenkinsRule jenkinsRule = new JenkinsRule();
+
+    @Test
+    public void testConfigurePage() throws IOException, SAXException {
+        HtmlPage page = jenkinsRule.createWebClient().goTo("configure");
         WebAssert.assertTextPresent(page, "AWS CodeDeploy");
     }
 }
