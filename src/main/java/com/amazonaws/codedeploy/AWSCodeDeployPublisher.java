@@ -16,6 +16,7 @@ package com.amazonaws.codedeploy;
 
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.codedeploy.model.ListApplicationsResult;
+import com.amazonaws.services.codedeploy.model.ListDeploymentConfigsResult;
 import com.amazonaws.services.codedeploy.model.ListDeploymentGroupsRequest;
 import com.amazonaws.services.codedeploy.model.ListDeploymentGroupsResult;
 import com.amazonaws.services.codedeploy.model.RevisionLocation;
@@ -58,6 +59,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -82,8 +84,8 @@ public class AWSCodeDeployPublisher extends Publisher {
     private final String  s3bucket;
     private final String  s3prefix;
     private final String  applicationName;
-    private final String  deploymentGroupName; // TODO allow for deployment to multiple groups
-    private final String  deploymentConfig;
+    private final String  deploymentGroupNames; // TODO allow for deployment to multiple groups
+    private final String  deploymentConfigs;
     private final Long    pollingTimeoutSec;
     private final Long    pollingFreqSec;
     private final boolean waitForCompletion;
@@ -100,6 +102,18 @@ public class AWSCodeDeployPublisher extends Publisher {
     private final String awsSecretKey;
     private final String credentials;
 
+    static class DeploymentRecord {
+        final String deploymentGroupName;
+        final String deploymentConfig;
+        String deploymentId;
+
+        DeploymentRecord(String deploymentGroupName, String deploymentConfig) {
+            this.deploymentGroupName = deploymentGroupName;
+            this.deploymentConfig = deploymentConfig;
+        }
+    }
+    List<DeploymentRecord> deploymentRecords;
+
     private PrintStream logger;
 
     // Fields in config.jelly must match the parameter names in the "DataBoundConstructor"
@@ -108,8 +122,8 @@ public class AWSCodeDeployPublisher extends Publisher {
             String s3bucket,
             String s3prefix,
             String applicationName,
-            String deploymentGroupName,
-            String deploymentConfig,
+            String deploymentGroupNames,
+            String deploymentConfigs,
             String region,
             Boolean waitForCompletion,
             Long pollingTimeoutSec,
@@ -127,11 +141,11 @@ public class AWSCodeDeployPublisher extends Publisher {
 
         this.externalId = externalId;
         this.applicationName = applicationName;
-        this.deploymentGroupName = deploymentGroupName;
-        if (deploymentConfig != null && deploymentConfig.length() == 0) {
-            this.deploymentConfig = null;
+        this.deploymentGroupNames = deploymentGroupNames;
+        if (deploymentConfigs != null && deploymentConfigs.length() == 0) {
+            this.deploymentConfigs = null;
         } else {
-            this.deploymentConfig = deploymentConfig;
+            this.deploymentConfigs = deploymentConfigs;
         }
         this.region = region;
         this.includes = includes;
@@ -170,6 +184,17 @@ public class AWSCodeDeployPublisher extends Publisher {
             this.s3prefix = s3prefix;
         }
 
+        // kfowler: hack to deploy to multiple groups
+        {
+            String[] groups = deploymentGroupNames.split(",");
+            String[] configs = deploymentConfigs.split(",");
+            if (groups.length != configs.length)
+                throw new RuntimeException("# of deployment configs must equal # of deployment group names");
+            deploymentRecords = new ArrayList<DeploymentRecord>();
+            for(int i = 0; i < groups.length ; ++ i) {
+                deploymentRecords.add(new DeploymentRecord(groups[i],configs[i]));
+            }
+        }
     }
 
     @Override
@@ -218,16 +243,10 @@ public class AWSCodeDeployPublisher extends Publisher {
             registerRevision(aws, revisionLocation);
 
             // kfowler: hack to deploy to multiple groups
-            String[] deploymentGroupNames = this.getDeploymentGroupName().split(",");
-            String[] deploymentConfigs    = this.getDeploymentConfig().split(",");
-            if (deploymentGroupNames.length != deploymentConfigs.length)
-                throw new RuntimeException("# of deployment configs must equal # of deployment group names");
 
-            for(int i = 0; i < deploymentGroupNames.length; ++i) {
-                String group = deploymentGroupNames[i];
-                String config = deploymentConfigs[i];
-                String deploymentId = createDeployment(aws, revisionLocation, group, config);
-                success = waitForDeployment(aws, deploymentId);
+            for(DeploymentRecord deployment : deploymentRecords){
+                deployment.deploymentId = createDeployment(aws, revisionLocation, deployment);
+                success = waitForDeployment(aws, deployment);
                 if (!success)
                     break;
             }
@@ -282,8 +301,10 @@ public class AWSCodeDeployPublisher extends Publisher {
                         .withApplicationName(this.applicationName)
         );
 
-        if (!deploymentGroups.getDeploymentGroups().contains(this.deploymentGroupName)) {
-            throw new IllegalArgumentException("Cannot find deployment group named '" + this.deploymentGroupName + "'");
+        for(DeploymentRecord deployment : deploymentRecords) {
+            if (!deploymentGroups.getDeploymentGroups().contains(deployment.deploymentGroupName)) {
+                throw new IllegalArgumentException("Cannot find deployment group named '" + deployment.deploymentGroupName + "'");
+            }
         }
     }
 
@@ -347,14 +368,14 @@ public class AWSCodeDeployPublisher extends Publisher {
         );
     }
 
-    private String createDeployment(AWSClients aws, RevisionLocation revisionLocation, String deploymentGroupName, String deploymentConfig) throws Exception {
+    private String createDeployment(AWSClients aws, RevisionLocation revisionLocation, DeploymentRecord config) throws Exception {
 
         this.logger.println("Creating deployment with revision at " + revisionLocation);
 
         CreateDeploymentResult createDeploymentResult = aws.codedeploy.createDeployment(
             new CreateDeploymentRequest()
-                .withDeploymentConfigName(deploymentConfig)
-                .withDeploymentGroupName(deploymentGroupName)
+                .withDeploymentConfigName(config.deploymentConfig)
+                .withDeploymentGroupName(config.deploymentGroupName)
                 .withApplicationName(this.applicationName)
                 .withRevision(revisionLocation)
                 .withDescription("Deployment created by Jenkins")
@@ -363,15 +384,15 @@ public class AWSCodeDeployPublisher extends Publisher {
         return createDeploymentResult.getDeploymentId();
     }
 
-    private boolean waitForDeployment(AWSClients aws, String deploymentId) throws InterruptedException {
+    private boolean waitForDeployment(AWSClients aws, DeploymentRecord deployment) throws InterruptedException {
 
         if (!this.waitForCompletion) {
             return true;
         }
 
-        logger.println("Monitoring deployment with ID " + deploymentId + "...");
+        logger.println("Monitoring deployment with ID " + deployment.deploymentId + "...");
         GetDeploymentRequest deployInfoRequest = new GetDeploymentRequest();
-        deployInfoRequest.setDeploymentId(deploymentId);
+        deployInfoRequest.setDeploymentId(deployment.deploymentId);
 
         DeploymentInfo deployStatus = aws.codedeploy.getDeployment(deployInfoRequest).getDeploymentInfo();
 
@@ -406,9 +427,9 @@ public class AWSCodeDeployPublisher extends Publisher {
 
             Thread.sleep(pollingFreqMillis);
         }
-        
+
         logger.println("Deployment status: " + deployStatus.getStatus() + "; instances: " + deployStatus.getDeploymentOverview());
-        
+
         if (!deployStatus.getStatus().equals(DeploymentStatus.Succeeded.toString())) {
             this.logger.println("Deployment did not succeed. Final status: " + deployStatus.getStatus());
             success = false;
@@ -582,8 +603,8 @@ public class AWSCodeDeployPublisher extends Publisher {
         return applicationName;
     }
 
-    public String getDeploymentGroupName() {
-        return deploymentGroupName;
+    public String getDeploymentGroupNames() {
+        return deploymentGroupNames;
     }
 
     public String getS3bucket() {
@@ -614,8 +635,8 @@ public class AWSCodeDeployPublisher extends Publisher {
         return pollingFreqSec;
     }
 
-    public String getDeploymentConfig() {
-        return deploymentConfig;
+    public String getDeploymentConfigs() {
+        return deploymentConfigs;
     }
 
     public String getExternalId() {
@@ -655,4 +676,3 @@ public class AWSCodeDeployPublisher extends Publisher {
     }
 
 }
-

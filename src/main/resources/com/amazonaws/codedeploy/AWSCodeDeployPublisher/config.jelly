@@ -2,10 +2,10 @@
   <f:entry title="AWS CodeDeploy Application Name" field="applicationName">
     <f:textbox />
   </f:entry>
-  <f:entry title="AWS CodeDeploy Deployment Groups" field="deploymentGroupName">
+  <f:entry title="AWS CodeDeploy Deployment Groups" field="deploymentGroupNames">
     <f:textbox />
   </f:entry>
-  <f:entry title="AWS CodeDeploy Deployment Configs" field="deploymentConfig">
+  <f:entry title="AWS CodeDeploy Deployment Configs" field="deploymentConfigs">
     <f:textbox />
   </f:entry>
   <f:entry title="AWS Region" field="region">
