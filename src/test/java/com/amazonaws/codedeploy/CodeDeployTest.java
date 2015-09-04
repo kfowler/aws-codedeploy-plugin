@@ -25,6 +25,8 @@ import org.xml.sax.SAXException;
 import com.gargoylesoftware.htmlunit.WebAssert;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
 
+import static org.junit.Assert.assertEquals;
+
 public class CodeDeployTest {
 
     @Rule
@@ -63,10 +65,10 @@ public class CodeDeployTest {
         project.getPublishersList().add(before);
         j.submit(j.createWebClient().getPage(project, "configure").getFormByName("config"));
         AWSCodeDeployPublisher after = project.getPublishersList().get(AWSCodeDeployPublisher.class);
-        j.assertEqualBeans(before, after, "deploymentGroupName,deploymentConfig");
+        j.assertEqualBeans(before, after, "deploymentGroupNames,deploymentConfigs");
     }
 
-    @Test
+    @Test(expected = RuntimeException.class)
     public void groupCountMustMatchConfigCount() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject();
         AWSCodeDeployPublisher before =
@@ -93,7 +95,40 @@ public class CodeDeployTest {
         project.getPublishersList().add(before);
         j.submit(j.createWebClient().getPage(project, "configure").getFormByName("config"));
         AWSCodeDeployPublisher after = project.getPublishersList().get(AWSCodeDeployPublisher.class);
-        j.assertEqualBeans(before, after, "deploymentGroupName,deploymentConfig");
+        j.assertEqualBeans(before, after, "deploymentGroupNames,deploymentConfigs");
     }
 
+    @Test
+    public void configsMatch() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+        AWSCodeDeployPublisher before =
+            new AWSCodeDeployPublisher(
+                "s3bucket",
+                "s3prefix",
+                "applicationName",
+                "deploymentGroup0,deploymentGroup1",
+                "deploymentConfig0,deploymentConfig1",
+                "region",
+                true, // waitForCompletion
+                300L,  // pollingTimeoutSec
+                15L,   // pollingFreqSec
+                "credentials",
+                "awsAccessKey",
+                "awsSecretKey",
+                "iamRoleArn",
+                "externalId",
+                "includes",
+                "proxyHost",
+                0,
+                "excludes",
+                "subdirectory");
+        project.getPublishersList().add(before);
+        j.submit(j.createWebClient().getPage(project, "configure").getFormByName("config"));
+        AWSCodeDeployPublisher after = project.getPublishersList().get(AWSCodeDeployPublisher.class);
+        assertEquals("deploymentGroup0", after.deploymentRecords.get(0).deploymentGroupName);
+        assertEquals("deploymentConfig0", after.deploymentRecords.get(0).deploymentConfig);
+        assertEquals("deploymentGroup1", after.deploymentRecords.get(1).deploymentGroupName);
+        assertEquals("deploymentConfig1", after.deploymentRecords.get(1).deploymentConfig);
+
+    }
 }
